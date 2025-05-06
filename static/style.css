@@ -1,0 +1,16 @@
+/* Custom styles for SimpleRAG */
+
+.answer-text {
+    white-space: pre-line;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+}
+
+.jumbotron {
+    padding: 2rem 1rem;
+    background-color: #e9ecef;
+    border-radius: 0.3rem;
+}
+
+/* Add a nl2br filter to the Jinja environment */

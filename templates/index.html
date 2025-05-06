@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}SimpleRAG - Home{% endblock %}
+
+{% block content %}
+<div class="jumbotron">
+    <h1 class="display-4">SimpleRAG</h1>
+    <p class="lead">A Retrieval-Augmented Generation System for Document Q&A</p>
+    <hr class="my-4">
+    
+    {% if is_configured %}
+        <p>Your system is configured and ready to use. Start by uploading documents or asking questions.</p>
+        <div class="d-grid gap-2 d-sm-flex justify-content-sm-center mt-4">
+            <a href="{{ url_for('upload') }}" class="btn btn-primary btn-lg px-4 me-sm-3">Upload Documents</a>
+            <a href="{{ url_for('query') }}" class="btn btn-outline-secondary btn-lg px-4">Ask Questions</a>
+        </div>
+    {% else %}
+        <p>Welcome to SimpleRAG! To get started, you need to configure your API keys.</p>
+        <div class="d-grid gap-2 d-sm-flex justify-content-sm-center mt-4">
+            <a href="{{ url_for('setup') }}" class="btn btn-primary btn-lg px-4">Configure System</a>
+        </div>
+    {% endif %}
+</div>
+
+<div class="row mt-5">
+    <div class="col-md-4">
+        <h3>📚 Document Indexing</h3>
+        <p>Upload PDF, TXT, DOCX, and HTML files to create a searchable knowledge base.</p>
+    </div>
+    <div class="col-md-4">
+        <h3>🔍 Semantic Search</h3>
+        <p>Ask questions in natural language and get relevant information from your documents.</p>
+    </div>
+    <div class="col-md-4">
+        <h3>🤖 LLM Integration</h3>
+        <p>Get high-quality answers using Claude or other LLMs based on your documents.</p>
+    </div>
+</div>
+{% endblock %}

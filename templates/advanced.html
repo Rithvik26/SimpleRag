@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}SimpleRAG - Advanced{% endblock %}
+
+{% block content %}
+<h2>Advanced Information</h2>
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h5>Current Configuration</h5>
+    </div>
+    <div class="card-body">
+        <table class="table">
+            <tr>
+                <th>Setting</th>
+                <th>Value</th>
+            </tr>
+            <tr>
+                <td>Embedding Model</td>
+                <td>Gemini Embedding API</td>
+            </tr>
+            <tr>
+                <td>Vector Database</td>
+                <td>Qdrant Cloud</td>
+            </tr>
+            <tr>
+                <td>Preferred LLM</td>
+                <td>{{ config.preferred_llm }}</td>
+            </tr>
+            <tr>
+                <td>Chunk Size</td>
+                <td>{{ config.chunk_size }}</td>
+            </tr>
+            <tr>
+                <td>Chunk Overlap</td>
+                <td>{{ config.chunk_overlap }}</td>
+            </tr>
+            <tr>
+                <td>Results Count (Top K)</td>
+                <td>{{ config.top_k }}</td>
+            </tr>
+        </table>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h5>How It Works</h5>
+    </div>
+    <div class="card-body">
+        <h6>1. Document Processing</h6>
+        <p>Documents are parsed, extracted, and split into chunks of text with some overlap.</p>
+
+        <h6>2. Vector Embeddings</h6>
+        <p>Each chunk is converted into a vector embedding using the Gemini API.</p>
+
+        <h6>3. Vector Storage</h6>
+        <p>Embeddings are stored in Qdrant vector database for efficient similarity search.</p>
+
+        <h6>4. Query Processing</h6>
+        <p>When you ask a question, it's converted to an embedding and used to find the most similar chunks.</p>
+
+        <h6>5. LLM Integration</h6>
+        <p>The most relevant chunks are sent to Claude LLM along with your question to generate a comprehensive answer.</p>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h5>About SimpleRAG</h5>
+    </div>
+    <div class="card-body">
+        <p>SimpleRAG is a Retrieval-Augmented Generation system for document Q&A. It allows you to create a searchable knowledge base from your documents and ask questions in natural language.</p>
+        
+        <p>This web application is a simple interface for the SimpleRAG system. For more advanced usage, you can use the command-line interface or integrate it into your own applications.</p>
+    </div>
+</div>
+{% endblock %}

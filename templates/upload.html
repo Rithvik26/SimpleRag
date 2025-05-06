@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}SimpleRAG - Upload Documents{% endblock %}
+
+{% block content %}
+<h2>Upload Documents</h2>
+<p>Upload documents to index them into the vector database.</p>
+
+<div class="card mt-4">
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data" class="mb-3">
+            <div class="mb-3">
+                <label for="document" class="form-label">Select Document</label>
+                <input type="file" class="form-control" id="document" name="document">
+                <div class="form-text">Supported formats: PDF, TXT, DOCX, HTML</div>
+            </div>
+            <button type="submit" class="btn btn-primary">Upload & Index</button>
+        </form>
+    </div>
+</div>
+
+<div class="mt-4">
+    <h4>Indexing Process</h4>
+    <ol>
+        <li>Your document is uploaded and text is extracted</li>
+        <li>Text is split into chunks with some overlap</li>
+        <li>Each chunk is converted to a vector embedding</li>
+        <li>Embeddings are stored in the vector database</li>
+    </ol>
+    <p class="alert alert-info">
+        <strong>Note:</strong> Document processing can take some time depending on the file size and complexity.
+    </p>
+</div>
+{% endblock %}

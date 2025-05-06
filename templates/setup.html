@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}SimpleRAG - Setup{% endblock %}
+
+{% block content %}
+<h2>Configure SimpleRAG</h2>
+<p>Enter your API keys and settings to configure the system.</p>
+
+<form method="post" class="mt-4">
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5>API Keys</h5>
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label for="gemini_api_key" class="form-label">Gemini API Key <span class="text-danger">*</span></label>
+                <input type="password" class="form-control" id="gemini_api_key" name="gemini_api_key" 
+                       value="{{ config.gemini_api_key }}" required>
+                <div class="form-text">Required for embeddings. Get a key from <a href="https://makersuite.google.com/" target="_blank">Google AI Studio</a>.</div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="claude_api_key" class="form-label">Claude API Key</label>
+                <input type="password" class="form-control" id="claude_api_key" name="claude_api_key" 
+                       value="{{ config.claude_api_key }}">
+                <div class="form-text">Required if using Claude LLM. Get a key from <a href="https://anthropic.com/" target="_blank">Anthropic</a>.</div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="qdrant_api_key" class="form-label">Qdrant API Key</label>
+                <input type="password" class="form-control" id="qdrant_api_key" name="qdrant_api_key" 
+                       value="{{ config.qdrant_api_key }}">
+                <div class="form-text">Required for vector database. Get a key from <a href="https://cloud.qdrant.io/" target="_blank">Qdrant Cloud</a>.</div>
+            </div>
+                
+            <div class="mb-3">
+                <label for="qdrant_url" class="form-label">Qdrant URL</label>
+                <input type="text" class="form-control" id="qdrant_url" name="qdrant_url" 
+                    value="{{ config.qdrant_url }}">
+                <div class="form-text">URL of your Qdrant instance (e.g., https://your-instance.qdrant.io)</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5>LLM Settings</h5>
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label">Preferred LLM</label>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="preferred_llm" id="claude" value="claude" 
+                           {% if config.preferred_llm == 'claude' %}checked{% endif %}>
+                    <label class="form-check-label" for="claude">Claude</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="preferred_llm" id="raw" value="raw" 
+                           {% if config.preferred_llm == 'raw' %}checked{% endif %}>
+                    <label class="form-check-label" for="raw">Raw Results (No LLM)</label>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5>Advanced Settings</h5>
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label for="chunk_size" class="form-label">Chunk Size</label>
+                <input type="number" class="form-control" id="chunk_size" name="chunk_size" 
+                       value="{{ config.chunk_size }}" min="100" max="5000">
+                <div class="form-text">Size of text chunks in characters (500-5000 recommended).</div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="chunk_overlap" class="form-label">Chunk Overlap</label>
+                <input type="number" class="form-control" id="chunk_overlap" name="chunk_overlap" 
+                       value="{{ config.chunk_overlap }}" min="0" max="1000">
+                <div class="form-text">Overlap between adjacent chunks (50-500 recommended).</div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="top_k" class="form-label">Results Count (Top K)</label>
+                <input type="number" class="form-control" id="top_k" name="top_k" 
+                       value="{{ config.top_k }}" min="1" max="20">
+                <div class="form-text">Number of results to retrieve for each query (1-20).</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="d-grid gap-2">
+        <button type="submit" class="btn btn-primary">Save Configuration</button>
+    </div>
+</form>
+{% endblock %}
