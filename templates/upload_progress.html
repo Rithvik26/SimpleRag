@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}SimpleRAG - Upload Progress{% endblock %}
+
+{% block content %}
+<h2>Upload Progress</h2>
+<p>Your document is being indexed. This process may take a few minutes depending on the document size.</p>
+
+<div class="card mt-4">
+    <div class="card-header">
+        <h5>Indexing Progress</h5>
+    </div>
+    <div class="card-body">
+        <div class="progress mb-3">
+            <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                 role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%">
+                0%
+            </div>
+        </div>
+        
+        <div id="status-message" class="alert alert-info">
+            Starting indexing process...
+        </div>
+        
+        <div class="text-center mt-3">
+            <div id="loading-spinner" class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+        
+        <div class="mt-3">
+            <p>Document: <span id="current-file">Preparing...</span></p>
+        </div>
+        
+        <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-4">
+            <a href="{{ url_for('query') }}" class="btn btn-outline-primary" id="finish-button" style="display: none;">
+                Continue to Ask Questions
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Poll for indexing progress
+    let pollInterval;
+    let completed = false;
+    
+    function updateProgress() {
+        fetch('/api/progress/index_document')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Progress information not available');
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Update progress bar
+                const percentage = data.percentage || 0;
+                const progressBar = document.getElementById('progress-bar');
+                progressBar.style.width = `${percentage}%`;
+                progressBar.textContent = `${percentage}%`;
+                progressBar.setAttribute('aria-valuenow', percentage);
+                
+                // Update status message
+                const statusMessage = document.getElementById('status-message');
+                statusMessage.textContent = data.message || 'Processing...';
+                
+                // Update current file
+                const currentFile = document.getElementById('current-file');
+                currentFile.textContent = data.current_file || 'Processing...';
+                
+                // Handle completion or error
+                if (data.status === 'complete') {
+                    completeProcess(true, data.message);
+                } else if (data.status === 'error') {
+                    completeProcess(false, data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching progress:', error);
+            });
+    }
+    
+    function completeProcess(success, message) {
+        if (!completed) {
+            completed = true;
+            clearInterval(pollInterval);
+            
+            // Hide spinner
+            document.getElementById('loading-spinner').style.display = 'none';
+            
+            // Update progress bar
+            const progressBar = document.getElementById('progress-bar');
+            progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+            
+            if (success) {
+                progressBar.classList.add('bg-success');
+                progressBar.style.width = '100%';
+                progressBar.textContent = '100%';
+                
+                // Update status message
+                const statusMessage = document.getElementById('status-message');
+                statusMessage.classList.remove('alert-info');
+                statusMessage.classList.add('alert-success');
+                statusMessage.textContent = message || 'Document indexed successfully!';
+                
+                // Show finish button
+                document.getElementById('finish-button').style.display = 'block';
+            } else {
+                progressBar.classList.add('bg-danger');
+                
+                // Update status message
+                const statusMessage = document.getElementById('status-message');
+                statusMessage.classList.remove('alert-info');
+                statusMessage.classList.add('alert-danger');
+                statusMessage.textContent = message || 'An error occurred during indexing.';
+            }
+        }
+    }
+    
+    // Start polling when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        // Start polling immediately
+        updateProgress();
+        
+        // Then poll every second
+        pollInterval = setInterval(updateProgress, 1000);
+        
+        // Set a timeout to stop polling after 10 minutes
+        setTimeout(function() {
+            if (!completed) {
+                clearInterval(pollInterval);
+                completeProcess(false, 'Indexing timed out. The document might be too large or complex.');
+            }
+        }, 10 * 60 * 1000);
+    });
+</script>
+{% endblock %}

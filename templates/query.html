@@ -14,21 +14,211 @@
                 <input type="text" class="form-control" id="question" name="question" 
                        value="{{ question|default('') }}" required placeholder="What would you like to know about your documents?">
             </div>
+            <input type="hidden" name="async" id="async-input" value="false">
             <button type="submit" class="btn btn-primary">Ask</button>
         </form>
     </div>
 </div>
 
-{% if answer %}
+{% if in_progress %}
+<!-- Query Progress Display -->
+<div id="query-progress" class="card mt-4">
+    <div class="card-header">
+        <h5>Processing Query</h5>
+    </div>
+    <div class="card-body">
+        <div class="progress mb-3">
+            <div id="query-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                 role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%">
+                0%
+            </div>
+        </div>
+        
+        <div id="query-status-message" class="alert alert-info">
+            Starting to process your question...
+        </div>
+        
+        <div class="text-center mt-3">
+            <div id="query-loading-spinner" class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Result Display (initially hidden) -->
+<div id="answer-container" class="card mt-4" style="display: none;">
+    <div class="card-header">
+        <h5>Answer</h5>
+    </div>
+    <div class="card-body">
+        <div id="answer-text" class="answer-text markdown-content">
+            <!-- Will be populated with the answer -->
+        </div>
+    </div>
+</div>
+{% elif answer %}
 <div class="card mt-4">
     <div class="card-header">
         <h5>Answer</h5>
     </div>
     <div class="card-body">
-        <div class="answer-text">
-            {{ answer | nl2br }}
+        <div class="answer-text markdown-content">
+            {{ answer | safe }}
         </div>
     </div>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+    // Convert markdown to HTML
+    document.addEventListener('DOMContentLoaded', function() {
+        const markdownElements = document.querySelectorAll('.markdown-content');
+        markdownElements.forEach(element => {
+            const content = element.innerHTML.trim();
+            if (content) {
+                // Replace <br> tags with newlines for proper markdown parsing
+                const preprocessed = content.replace(/<br>/g, '\n');
+                // Convert cleaned markdown to HTML
+                element.innerHTML = marked.parse(preprocessed);
+            }
+        });
+    });
+</script>
+
+{% if in_progress %}
+<script>
+    // Poll for query progress
+    let queryPollInterval;
+    let queryCompleted = false;
+    
+    function updateQueryProgress() {
+        fetch('/api/progress/query')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Progress information not available');
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Update progress bar
+                const percentage = data.percentage || 0;
+                const progressBar = document.getElementById('query-progress-bar');
+                progressBar.style.width = `${percentage}%`;
+                progressBar.textContent = `${percentage}%`;
+                progressBar.setAttribute('aria-valuenow', percentage);
+                
+                // Update status message
+                const statusMessage = document.getElementById('query-status-message');
+                statusMessage.textContent = data.message || 'Processing...';
+                
+                // Handle completion or error
+                if (data.status === 'complete') {
+                    fetchQueryResult();
+                } else if (data.status === 'error') {
+                    showQueryError(data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching query progress:', error);
+            });
+    }
+    
+    function fetchQueryResult() {
+        fetch('/api/query/result')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Query result not available yet');
+                }
+                return response.json();
+            })
+            .then(data => {
+                completeQueryProcess(data.result);
+            })
+            .catch(error => {
+                console.error('Error fetching query result:', error);
+                // Continue polling if result not ready yet
+                if (!queryCompleted) {
+                    setTimeout(fetchQueryResult, 1000);
+                }
+            });
+    }
+    
+    function completeQueryProcess(result) {
+        if (!queryCompleted) {
+            queryCompleted = true;
+            clearInterval(queryPollInterval);
+            
+            // Hide progress elements
+            document.getElementById('query-progress').style.display = 'none';
+            
+            // Show answer
+            const answerContainer = document.getElementById('answer-container');
+            const answerText = document.getElementById('answer-text');
+            answerContainer.style.display = 'block';
+            
+            // Convert answer to markdown HTML
+            const preprocessed = result.replace(/<br>/g, '\n');
+            answerText.innerHTML = marked.parse(preprocessed);
+        }
+    }
+    
+    function showQueryError(message) {
+        if (!queryCompleted) {
+            queryCompleted = true;
+            clearInterval(queryPollInterval);
+            
+            // Hide progress elements
+            document.getElementById('query-loading-spinner').style.display = 'none';
+            
+            // Show error message
+            const statusMessage = document.getElementById('query-status-message');
+            statusMessage.classList.remove('alert-info');
+            statusMessage.classList.add('alert-danger');
+            statusMessage.textContent = message || 'An error occurred while processing your query.';
+            
+            // Update progress bar to error style
+            const progressBar = document.getElementById('query-progress-bar');
+            progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+            progressBar.classList.add('bg-danger');
+        }
+    }
+    
+    // Start polling when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        // Start polling immediately
+        updateQueryProgress();
+        
+        // Then poll every second
+        queryPollInterval = setInterval(updateQueryProgress, 1000);
+        
+        // Set a timeout to stop polling after 5 minutes
+        setTimeout(function() {
+            if (!queryCompleted) {
+                clearInterval(queryPollInterval);
+                showQueryError('Query processing timed out. Please try a simpler question or check your connection.');
+            }
+        }, 5 * 60 * 1000);
+    });
+</script>
+{% endif %}
+
+<script>
+    // Automatically use async mode for long questions
+    document.addEventListener('DOMContentLoaded', function() {
+        const questionInput = document.getElementById('question');
+        const asyncInput = document.getElementById('async-input');
+        const form = questionInput.form;
+        
+        form.addEventListener('submit', function(event) {
+            // If question is longer than 100 characters, use async mode
+            if (questionInput.value.length > 100) {
+                asyncInput.value = 'true';
+            }
+        });
+    });
+</script>
 {% endblock %}

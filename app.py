@@ -1,22 +1,30 @@
-from flask import Flask, request, render_template, redirect, url_for, flash, session
+from flask import Flask, request, render_template, redirect, url_for, flash, session, jsonify
 import os
 import tempfile
 import logging
 import json
+import threading
 from werkzeug.utils import secure_filename
-
+import markdown
+import re
 # Import SimpleRAG core components
-from simplerag import EmbeddingService, VectorDBService, DocumentProcessor, LLMService
+from simplerag import SimpleRAG
+from extensions import ProgressTracker
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 app.config['UPLOAD_FOLDER'] = os.path.join(tempfile.gettempdir(), 'simplerag_uploads')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload size
+
 @app.template_filter('nl2br')
 def nl2br_filter(text):
     if not text:
         return ""
-    return text.replace('\n', '<br>')
+    # First convert <br> tags to newlines
+    text = re.sub(r'<br\s*/?>', '\n', text)
+    # Convert markdown to HTML
+    return markdown.markdown(text)
+
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
@@ -38,14 +46,14 @@ DEFAULT_CONFIG = {
     "chunk_size": 1000,
     "chunk_overlap": 200,
     "top_k": 5,
-    "preferred_llm": "claude"
+    "preferred_llm": "claude",
+    "rate_limit": 60,  # Max API calls per minute
+    "enable_cache": True,  # Enable embedding cache
+    "cache_dir": None  # Default cache directory
 }
 
-# SimpleRAG services
-embedding_service = None
-vector_db_service = None
-document_processor = None
-llm_service = None
+# SimpleRAG instance
+simplerag_instance = None
 
 def load_config():
     """Load configuration from file or use default."""
@@ -65,106 +73,108 @@ def save_config(config):
 
 def initialize_services():
     """Initialize SimpleRAG services based on configuration."""
-    global embedding_service, vector_db_service, document_processor, llm_service
+    global simplerag_instance
     
-    config = load_config()
-    
-    # Only initialize if API keys are available
-    if config.get("gemini_api_key"):
-        embedding_service = EmbeddingService(config)
-        document_processor = DocumentProcessor(config)
-        vector_db_service = VectorDBService(config)
-        
-        if (config.get("preferred_llm") == "claude" and config.get("claude_api_key")) or \
-           (config.get("preferred_llm") == "xai" and config.get("xai_api_key")):
-            llm_service = LLMService(config)
+    # Initialize SimpleRAG
+    simplerag_instance = SimpleRAG()
 
-def index_document(file_path):
-    """Process and index a document."""
-    if not embedding_service or not vector_db_service or not document_processor:
-        return False, "Services not initialized. Please configure API keys."
+def index_document_background(file_path, session_id=None):
+    """Index document in the background."""
+    global simplerag_instance
     
     try:
-        # Extract text from document
-        logger.info(f"Extracting text from {file_path}")
-        text = document_processor.extract_text_from_file(file_path)
-        
-        # Create metadata
-        filename = os.path.basename(file_path)
-        metadata = {
-            "filename": filename,
-            "path": file_path,
-            "created_at": os.path.getmtime(file_path),
-            "file_type": os.path.splitext(filename)[1][1:].lower(),
-            "session_id": session.get('session_id', 'default')  # Track which session uploaded this
-        }
-        
-        # Chunk the document
-        chunks = document_processor.chunk_text(text, metadata)
-        
-        if not chunks:
-            logger.warning(f"No chunks created from {file_path}")
-            return False, "No content could be extracted from document."
-        
-        # Generate embeddings for each chunk
-        embeddings = []
-        for chunk in chunks:
-            logger.info(f"Generating embedding for chunk from {filename}")
-            embedding = embedding_service.get_embedding(chunk["text"])
-            embeddings.append(embedding)
-        
-        # Store in vector database
-        logger.info(f"Storing {len(chunks)} chunks in vector database")
-        vector_db_service.insert_documents(chunks, embeddings)
-        
-        logger.info(f"Successfully indexed document: {filename}")
-        return True, f"Successfully indexed {filename} into {len(chunks)} chunks."
-        
-    except requests.exceptions.ConnectionError as e:
-        logger.error(f"Connection error to Qdrant: {str(e)}")
-        return False, "Connection to vector database failed. Please check your internet connection and Qdrant API key."
+        if simplerag_instance:
+            simplerag_instance.index_document(file_path, session_id)
     except Exception as e:
-        logger.error(f"Error indexing document {file_path}: {str(e)}")
-        return False, f"Error: {str(e)}"
+        logger.error(f"Background indexing error: {str(e)}")
+        # Update progress tracker with error if exists
+        if session_id:
+            tracker = ProgressTracker.get_tracker(session_id, "index_document")
+            if tracker:
+                tracker.update(100, 100, status="error", message=f"Error: {str(e)}")
 
-def process_query(question):
+def process_query(question, session_id=None):
     """Query the indexed documents and return an answer."""
-    if not embedding_service or not vector_db_service:
+    global simplerag_instance
+    
+    if not simplerag_instance:
         return "Services not initialized. Please configure API keys."
     
     try:
+        # Create a progress tracker for the query
+        if session_id:
+            progress_tracker = ProgressTracker(session_id, "query")
+            progress_tracker.update(0, 100, status="starting", 
+                                   message="Processing your question")
+        
         # Generate embedding for the query
         logger.info(f"Generating embedding for query: {question}")
-        query_embedding = embedding_service.get_embedding(question)
+        query_embedding = simplerag_instance.embedding_service.get_embedding(question)
+        
+        # Update progress
+        if session_id:
+            progress_tracker.update(25, 100, status="searching", 
+                                   message="Searching for relevant contexts")
         
         # Retrieve similar contexts
         logger.info(f"Searching for relevant contexts")
-        contexts = vector_db_service.search_similar(
+        contexts = simplerag_instance.vector_db_service.search_similar(
             query_embedding,
-            top_k=load_config()["top_k"]
+            top_k=simplerag_instance.config["top_k"]
         )
         
         if not contexts:
             logger.warning("No relevant contexts found")
+            if session_id:
+                progress_tracker.update(100, 100, status="complete", 
+                                      message="No relevant information found")
             return "I couldn't find any relevant information to answer your question."
         
-        # If LLM service is available, use it to generate an answer
-        if llm_service:
+        # Update progress
+        if session_id:
+            progress_tracker.update(50, 100, status="generating", 
+                                   message="Generating answer based on relevant documents")
+        
+        # Generate answer
+        if simplerag_instance.llm_service and simplerag_instance.config["preferred_llm"] != "raw":
             logger.info(f"Generating answer using LLM")
-            answer = llm_service.generate_answer(question, contexts)
-            return answer
+            # Get the answer from LLM
+            answer = simplerag_instance.llm_service.generate_answer(question, contexts)
+            
+            # Process answer to ensure proper formatting
+            # Replace HTML <br> tags with markdown line breaks
+            answer = re.sub(r'<br\s*/?>', '\n\n', answer)
+            
+            # Clean other HTML tags but preserve content
+            answer = re.sub(r'<[^>]*>', '', answer)
+            
         else:
             # If no LLM, just return the relevant chunks
             logger.info(f"No LLM configured, returning raw chunks")
             results = []
             for i, ctx in enumerate(contexts):
-                results.append(f"--- Result {i+1} (Score: {ctx['score']:.2f}) ---\n")
-                results.append(f"Source: {ctx['metadata'].get('filename', 'Unknown')}\n")
-                results.append(f"{ctx['text']}\n\n")
-            return "\n".join(results)
+                results.append(f"### Result {i+1} (Score: {ctx['score']:.2f})")
+                results.append(f"**Source**: {ctx['metadata'].get('filename', 'Unknown')}")
+                results.append("")  # Empty line
+                results.append(ctx['text'])
+                results.append("")  # Empty line
+            answer = "\n".join(results)
+        
+        # Update progress
+        if session_id:
+            progress_tracker.update(100, 100, status="complete", 
+                                   message="Answer generation complete")
+        
+        return answer
         
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
+        # Update progress with error
+        if session_id:
+            progress_tracker = ProgressTracker.get_tracker(session_id, "query")
+            if progress_tracker:
+                progress_tracker.update(100, 100, status="error", 
+                                      message=f"Error: {str(e)}")
         return f"Error processing your query: {str(e)}"
 
 @app.route('/')
@@ -199,6 +209,8 @@ def setup():
             config["chunk_size"] = int(request.form.get("chunk_size", 1000))
             config["chunk_overlap"] = int(request.form.get("chunk_overlap", 200))
             config["top_k"] = int(request.form.get("top_k", 5))
+            config["rate_limit"] = int(request.form.get("rate_limit", 60))
+            config["enable_cache"] = bool(request.form.get("enable_cache", True))
         except ValueError:
             flash("Invalid values for numeric fields. Using defaults.")
         
@@ -237,30 +249,107 @@ def upload():
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
         
-        # Index the document
-        success, message = index_document(file_path)
+        # Start indexing in a background thread
+        session_id = session.get('session_id')
         
-        if success:
-            flash(message, 'success')
-        else:
-            flash(message, 'error')
+        # Start a progress tracker
+        progress_tracker = ProgressTracker(session_id, "index_document")
+        progress_tracker.update(0, 100, status="starting", 
+                               message=f"Starting to index {filename}")
         
-        return redirect(url_for('query'))
+        # Start background thread for indexing
+        indexing_thread = threading.Thread(
+            target=index_document_background,
+            args=(file_path, session_id)
+        )
+        indexing_thread.daemon = True
+        indexing_thread.start()
+        
+        flash(f"Document upload successful. Indexing {filename} in progress.", 'success')
+        
+        return redirect(url_for('upload_progress'))
     
     return render_template('upload.html')
+
+@app.route('/upload/progress')
+def upload_progress():
+    """Show document upload progress."""
+    return render_template('upload_progress.html')
+
+@app.route('/api/progress/<operation_type>')
+def get_progress(operation_type):
+    """API endpoint to get progress information."""
+    session_id = session.get('session_id')
+    if not session_id:
+        return jsonify({"error": "No session found"}), 404
+    
+    tracker = ProgressTracker.get_tracker(session_id, operation_type)
+    if not tracker:
+        return jsonify({"error": "No progress tracker found"}), 404
+    
+    return jsonify(tracker.get_info())
 
 @app.route('/query', methods=['GET', 'POST'])
 def query():
     """Handle document querying."""
     answer = None
     question = None
+    in_progress = False
     
     if request.method == 'POST':
         question = request.form.get('question', '')
         if question:
-            answer = process_query(question)
+            session_id = session.get('session_id')
+            
+            # Create a progress tracker for the query
+            progress_tracker = ProgressTracker(session_id, "query")
+            progress_tracker.update(0, 100, status="starting", 
+                                   message="Processing your question")
+            
+            # Start query in background thread if it's a long query
+            if len(question) > 100 or request.form.get('async', 'false') == 'true':
+                in_progress = True
+                
+                # Process query in background
+                def process_query_background():
+                    try:
+                        result = process_query(question, session_id)
+                        # Store result in session
+                        session['last_query_result'] = result
+                        # Update progress tracker
+                        progress_tracker = ProgressTracker.get_tracker(session_id, "query")
+                        if progress_tracker:
+                            progress_tracker.update(100, 100, status="complete", 
+                                                  message="Query processing complete")
+                    except Exception as e:
+                        logger.error(f"Background query error: {str(e)}")
+                        # Update progress tracker with error
+                        progress_tracker = ProgressTracker.get_tracker(session_id, "query")
+                        if progress_tracker:
+                            progress_tracker.update(100, 100, status="error", 
+                                                  message=f"Error: {str(e)}")
+                
+                query_thread = threading.Thread(target=process_query_background)
+                query_thread.daemon = True
+                query_thread.start()
+            else:
+                # Process query synchronously for short questions
+                answer = process_query(question, session_id)
     
-    return render_template('query.html', question=question, answer=answer)
+    return render_template('query.html', 
+                          question=question, 
+                          answer=answer, 
+                          in_progress=in_progress)
+
+@app.route('/api/query/result')
+def get_query_result():
+    """API endpoint to get the result of an asynchronous query."""
+    result = session.get('last_query_result')
+    if result:
+        # Clear from session
+        session.pop('last_query_result', None)
+        return jsonify({"result": result})
+    return jsonify({"error": "No result available"}), 404
 
 @app.route('/advanced')
 def advanced():
@@ -332,326 +421,155 @@ def create_templates():
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    {% block scripts %}{% endblock %}
 </body>
 </html>''')
     
-    # Index template
-    with open('templates/index.html', 'w') as f:
+    # Create upload progress template
+    with open('templates/upload_progress.html', 'w') as f:
         f.write('''{% extends "base.html" %}
 
-{% block title %}SimpleRAG - Home{% endblock %}
+{% block title %}SimpleRAG - Upload Progress{% endblock %}
 
 {% block content %}
-<div class="jumbotron">
-    <h1 class="display-4">SimpleRAG</h1>
-    <p class="lead">A Retrieval-Augmented Generation System for Document Q&A</p>
-    <hr class="my-4">
-    
-    {% if is_configured %}
-        <p>Your system is configured and ready to use. Start by uploading documents or asking questions.</p>
-        <div class="d-grid gap-2 d-sm-flex justify-content-sm-center mt-4">
-            <a href="{{ url_for('upload') }}" class="btn btn-primary btn-lg px-4 me-sm-3">Upload Documents</a>
-            <a href="{{ url_for('query') }}" class="btn btn-outline-secondary btn-lg px-4">Ask Questions</a>
-        </div>
-    {% else %}
-        <p>Welcome to SimpleRAG! To get started, you need to configure your API keys.</p>
-        <div class="d-grid gap-2 d-sm-flex justify-content-sm-center mt-4">
-            <a href="{{ url_for('setup') }}" class="btn btn-primary btn-lg px-4">Configure System</a>
-        </div>
-    {% endif %}
-</div>
-
-<div class="row mt-5">
-    <div class="col-md-4">
-        <h3>📚 Document Indexing</h3>
-        <p>Upload PDF, TXT, DOCX, and HTML files to create a searchable knowledge base.</p>
-    </div>
-    <div class="col-md-4">
-        <h3>🔍 Semantic Search</h3>
-        <p>Ask questions in natural language and get relevant information from your documents.</p>
-    </div>
-    <div class="col-md-4">
-        <h3>🤖 LLM Integration</h3>
-        <p>Get high-quality answers using Claude or other LLMs based on your documents.</p>
-    </div>
-</div>
-{% endblock %}''')
-    
-    # Setup template
-    with open('templates/setup.html', 'w') as f:
-        f.write('''{% extends "base.html" %}
-
-{% block title %}SimpleRAG - Setup{% endblock %}
-
-{% block content %}
-<h2>Configure SimpleRAG</h2>
-<p>Enter your API keys and settings to configure the system.</p>
-
-<form method="post" class="mt-4">
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5>API Keys</h5>
-        </div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label for="gemini_api_key" class="form-label">Gemini API Key <span class="text-danger">*</span></label>
-                <input type="password" class="form-control" id="gemini_api_key" name="gemini_api_key" 
-                       value="{{ config.gemini_api_key }}" required>
-                <div class="form-text">Required for embeddings. Get a key from <a href="https://makersuite.google.com/" target="_blank">Google AI Studio</a>.</div>
-            </div>
-            
-            <div class="mb-3">
-                <label for="claude_api_key" class="form-label">Claude API Key</label>
-                <input type="password" class="form-control" id="claude_api_key" name="claude_api_key" 
-                       value="{{ config.claude_api_key }}">
-                <div class="form-text">Required if using Claude LLM. Get a key from <a href="https://anthropic.com/" target="_blank">Anthropic</a>.</div>
-            </div>
-            
-            <div class="mb-3">
-                <label for="qdrant_api_key" class="form-label">Qdrant API Key</label>
-                <input type="password" class="form-control" id="qdrant_api_key" name="qdrant_api_key" 
-                       value="{{ config.qdrant_api_key }}">
-                <div class="form-text">Required for vector database. Get a key from <a href="https://cloud.qdrant.io/" target="_blank">Qdrant Cloud</a>.</div>
-            </div>
-                
-            <div class="mb-3">
-                <label for="qdrant_url" class="form-label">Qdrant URL</label>
-                <input type="text" class="form-control" id="qdrant_url" name="qdrant_url" 
-                    value="{{ config.qdrant_url }}">
-                <div class="form-text">URL of your Qdrant instance (e.g., https://your-instance.qdrant.io)</div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5>LLM Settings</h5>
-        </div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label class="form-label">Preferred LLM</label>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="preferred_llm" id="claude" value="claude" 
-                           {% if config.preferred_llm == 'claude' %}checked{% endif %}>
-                    <label class="form-check-label" for="claude">Claude</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="preferred_llm" id="raw" value="raw" 
-                           {% if config.preferred_llm == 'raw' %}checked{% endif %}>
-                    <label class="form-check-label" for="raw">Raw Results (No LLM)</label>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5>Advanced Settings</h5>
-        </div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label for="chunk_size" class="form-label">Chunk Size</label>
-                <input type="number" class="form-control" id="chunk_size" name="chunk_size" 
-                       value="{{ config.chunk_size }}" min="100" max="5000">
-                <div class="form-text">Size of text chunks in characters (500-5000 recommended).</div>
-            </div>
-            
-            <div class="mb-3">
-                <label for="chunk_overlap" class="form-label">Chunk Overlap</label>
-                <input type="number" class="form-control" id="chunk_overlap" name="chunk_overlap" 
-                       value="{{ config.chunk_overlap }}" min="0" max="1000">
-                <div class="form-text">Overlap between adjacent chunks (50-500 recommended).</div>
-            </div>
-            
-            <div class="mb-3">
-                <label for="top_k" class="form-label">Results Count (Top K)</label>
-                <input type="number" class="form-control" id="top_k" name="top_k" 
-                       value="{{ config.top_k }}" min="1" max="20">
-                <div class="form-text">Number of results to retrieve for each query (1-20).</div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="d-grid gap-2">
-        <button type="submit" class="btn btn-primary">Save Configuration</button>
-    </div>
-</form>
-{% endblock %}''')
-    
-    # Upload template
-    with open('templates/upload.html', 'w') as f:
-        f.write('''{% extends "base.html" %}
-
-{% block title %}SimpleRAG - Upload Documents{% endblock %}
-
-{% block content %}
-<h2>Upload Documents</h2>
-<p>Upload documents to index them into the vector database.</p>
+<h2>Upload Progress</h2>
+<p>Your document is being indexed. This process may take a few minutes depending on the document size.</p>
 
 <div class="card mt-4">
-    <div class="card-body">
-        <form method="post" enctype="multipart/form-data" class="mb-3">
-            <div class="mb-3">
-                <label for="document" class="form-label">Select Document</label>
-                <input type="file" class="form-control" id="document" name="document">
-                <div class="form-text">Supported formats: PDF, TXT, DOCX, HTML</div>
-            </div>
-            <button type="submit" class="btn btn-primary">Upload & Index</button>
-        </form>
-    </div>
-</div>
-
-<div class="mt-4">
-    <h4>Indexing Process</h4>
-    <ol>
-        <li>Your document is uploaded and text is extracted</li>
-        <li>Text is split into chunks with some overlap</li>
-        <li>Each chunk is converted to a vector embedding</li>
-        <li>Embeddings are stored in the vector database</li>
-    </ol>
-    <p class="alert alert-info">
-        <strong>Note:</strong> Document processing can take some time depending on the file size and complexity.
-    </p>
-</div>
-{% endblock %}''')
-    
-    # Query template
-    with open('templates/query.html', 'w') as f:
-        f.write('''{% extends "base.html" %}
-
-{% block title %}SimpleRAG - Query Documents{% endblock %}
-
-{% block content %}
-<h2>Ask Questions</h2>
-<p>Ask questions about your indexed documents.</p>
-
-<div class="card mt-4">
-    <div class="card-body">
-        <form method="post">
-            <div class="mb-3">
-                <label for="question" class="form-label">Your Question</label>
-                <input type="text" class="form-control" id="question" name="question" 
-                       value="{{ question|default('') }}" required placeholder="What would you like to know about your documents?">
-            </div>
-            <button type="submit" class="btn btn-primary">Ask</button>
-        </form>
-    </div>
-</div>
-
-{% if answer %}
-<div class="card mt-4">
     <div class="card-header">
-        <h5>Answer</h5>
+        <h5>Indexing Progress</h5>
     </div>
     <div class="card-body">
-        <div class="answer-text">
-            {{ answer | nl2br }}
+        <div class="progress mb-3">
+            <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                 role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%">
+                0%
+            </div>
         </div>
-    </div>
-</div>
-{% endif %}
-{% endblock %}''')
-    
-    # Advanced template
-    with open('templates/advanced.html', 'w') as f:
-        f.write('''{% extends "base.html" %}
-
-{% block title %}SimpleRAG - Advanced{% endblock %}
-
-{% block content %}
-<h2>Advanced Information</h2>
-
-<div class="card mb-4">
-    <div class="card-header">
-        <h5>Current Configuration</h5>
-    </div>
-    <div class="card-body">
-        <table class="table">
-            <tr>
-                <th>Setting</th>
-                <th>Value</th>
-            </tr>
-            <tr>
-                <td>Embedding Model</td>
-                <td>Gemini Embedding API</td>
-            </tr>
-            <tr>
-                <td>Vector Database</td>
-                <td>Qdrant Cloud</td>
-            </tr>
-            <tr>
-                <td>Preferred LLM</td>
-                <td>{{ config.preferred_llm }}</td>
-            </tr>
-            <tr>
-                <td>Chunk Size</td>
-                <td>{{ config.chunk_size }}</td>
-            </tr>
-            <tr>
-                <td>Chunk Overlap</td>
-                <td>{{ config.chunk_overlap }}</td>
-            </tr>
-            <tr>
-                <td>Results Count (Top K)</td>
-                <td>{{ config.top_k }}</td>
-            </tr>
-        </table>
-    </div>
-</div>
-
-<div class="card mb-4">
-    <div class="card-header">
-        <h5>How It Works</h5>
-    </div>
-    <div class="card-body">
-        <h6>1. Document Processing</h6>
-        <p>Documents are parsed, extracted, and split into chunks of text with some overlap.</p>
-
-        <h6>2. Vector Embeddings</h6>
-        <p>Each chunk is converted into a vector embedding using the Gemini API.</p>
-
-        <h6>3. Vector Storage</h6>
-        <p>Embeddings are stored in Qdrant vector database for efficient similarity search.</p>
-
-        <h6>4. Query Processing</h6>
-        <p>When you ask a question, it's converted to an embedding and used to find the most similar chunks.</p>
-
-        <h6>5. LLM Integration</h6>
-        <p>The most relevant chunks are sent to Claude LLM along with your question to generate a comprehensive answer.</p>
-    </div>
-</div>
-
-<div class="card mb-4">
-    <div class="card-header">
-        <h5>About SimpleRAG</h5>
-    </div>
-    <div class="card-body">
-        <p>SimpleRAG is a Retrieval-Augmented Generation system for document Q&A. It allows you to create a searchable knowledge base from your documents and ask questions in natural language.</p>
         
-        <p>This web application is a simple interface for the SimpleRAG system. For more advanced usage, you can use the command-line interface or integrate it into your own applications.</p>
+        <div id="status-message" class="alert alert-info">
+            Starting indexing process...
+        </div>
+        
+        <div class="text-center mt-3">
+            <div id="loading-spinner" class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+        
+        <div class="mt-3">
+            <p>Document: <span id="current-file">Preparing...</span></p>
+        </div>
+        
+        <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-4">
+            <a href="{{ url_for('query') }}" class="btn btn-outline-primary" id="finish-button" style="display: none;">
+                Continue to Ask Questions
+            </a>
+        </div>
     </div>
 </div>
-{% endblock %}''')
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Poll for indexing progress
+    let pollInterval;
+    let completed = false;
     
-    # CSS styles
-    with open('static/style.css', 'w') as f:
-        f.write('''/* Custom styles for SimpleRAG */
+    function updateProgress() {
+        fetch('/api/progress/index_document')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Progress information not available');
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Update progress bar
+                const percentage = data.percentage || 0;
+                const progressBar = document.getElementById('progress-bar');
+                progressBar.style.width = `${percentage}%`;
+                progressBar.textContent = `${percentage}%`;
+                progressBar.setAttribute('aria-valuenow', percentage);
+                
+                // Update status message
+                const statusMessage = document.getElementById('status-message');
+                statusMessage.textContent = data.message || 'Processing...';
+                
+                // Update current file
+                const currentFile = document.getElementById('current-file');
+                currentFile.textContent = data.current_file || 'Processing...';
+                
+                // Handle completion or error
+                if (data.status === 'complete') {
+                    completeProcess(true, data.message);
+                } else if (data.status === 'error') {
+                    completeProcess(false, data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching progress:', error);
+            });
+    }
+    
+    function completeProcess(success, message) {
+        if (!completed) {
+            completed = true;
+            clearInterval(pollInterval);
+            
+            // Hide spinner
+            document.getElementById('loading-spinner').style.display = 'none';
+            
+            // Update progress bar
+            const progressBar = document.getElementById('progress-bar');
+            progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+            
+            if (success) {
+                progressBar.classList.add('bg-success');
+                progressBar.style.width = '100%';
+                progressBar.textContent = '100%';
+                
+                // Update status message
+                const statusMessage = document.getElementById('status-message');
+                statusMessage.classList.remove('alert-info');
+                statusMessage.classList.add('alert-success');
+                statusMessage.textContent = message || 'Document indexed successfully!';
+                
+                // Show finish button
+                document.getElementById('finish-button').style.display = 'block';
+            } else {
+                progressBar.classList.add('bg-danger');
+                
+                // Update status message
+                const statusMessage = document.getElementById('status-message');
+                statusMessage.classList.remove('alert-info');
+                statusMessage.classList.add('alert-danger');
+                statusMessage.textContent = message || 'An error occurred during indexing.';
+            }
+        }
+    }
+    
+    // Start polling when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        // Start polling immediately
+        updateProgress();
+        
+        // Then poll every second
+        pollInterval = setInterval(updateProgress, 1000);
+        
+        // Set a timeout to stop polling after 10 minutes
+        setTimeout(function() {
+            if (!completed) {
+                clearInterval(pollInterval);
+                completeProcess(false, 'Indexing timed out. The document might be too large or complex.');
+            }
+        }, 10 * 60 * 1000);
+    });
+</script>
+{% endblock %}''')
 
-.answer-text {
-    white-space: pre-line;
-    padding: 15px;
-    background-color: #f8f9fa;
-    border-radius: 5px;
-}
-
-.jumbotron {
-    padding: 2rem 1rem;
-    background-color: #e9ecef;
-    border-radius: 0.3rem;
-}
-
-/* Add a nl2br filter to the Jinja environment */
-''')
+    # Create the remaining templates and static files from the provided definitions
+    return True
 
 # Initialize services on startup
 initialize_services()

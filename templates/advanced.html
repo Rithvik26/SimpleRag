@@ -39,7 +39,31 @@
                 <td>Results Count (Top K)</td>
                 <td>{{ config.top_k }}</td>
             </tr>
+            <tr>
+                <td>API Rate Limit</td>
+                <td>{{ config.rate_limit }} calls per minute</td>
+            </tr>
+            <tr>
+                <td>Embedding Cache</td>
+                <td>{{ "Enabled" if config.enable_cache else "Disabled" }}</td>
+            </tr>
         </table>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h5>Performance Features</h5>
+    </div>
+    <div class="card-body">
+        <h6>1. Rate Limiting</h6>
+        <p>SimpleRAG implements rate limiting for API calls to prevent exceeding API provider quotas and avoid service interruptions. The system automatically throttles requests if they exceed the configured limit.</p>
+        
+        <h6>2. Embedding Cache</h6>
+        <p>To improve performance and reduce API costs, SimpleRAG can cache embeddings locally. When the same text needs to be embedded multiple times, the system will use the cached version instead of making additional API calls.</p>
+        
+        <h6>3. Progress Tracking</h6>
+        <p>For long-running operations like indexing large documents, SimpleRAG provides real-time progress indicators that show the current status of the operation.</p>
     </div>
 </div>
 

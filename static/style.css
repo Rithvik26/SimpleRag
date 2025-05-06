@@ -13,4 +13,241 @@
     border-radius: 0.3rem;
 }
 
-/* Add a nl2br filter to the Jinja environment */
+/* Progress bar enhancements */
+.progress {
+    height: 20px;
+    background-color: #e9ecef;
+    border-radius: 0.25rem;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+    margin-bottom: 1rem;
+}
+
+.progress-bar {
+    height: 100%;
+    color: #fff;
+    text-align: center;
+    background-color: #007bff;
+    transition: width 0.3s ease;
+}
+
+/* Animation for the progress bar */
+@keyframes progress-bar-stripes {
+    0% { background-position-x: 1rem; }
+}
+
+.progress-bar-striped {
+    background-image: linear-gradient(45deg, rgba(255, 255, 255, 0.15) 25%, 
+                                      transparent 25%, transparent 50%, 
+                                      rgba(255, 255, 255, 0.15) 50%, 
+                                      rgba(255, 255, 255, 0.15) 75%, 
+                                      transparent 75%, transparent);
+    background-size: 1rem 1rem;
+}
+
+.progress-bar-animated {
+    animation: progress-bar-stripes 1s linear infinite;
+}
+
+/* Status indicators */
+.status-indicator {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+}
+
+.status-indicator.success {
+    background-color: #28a745;
+}
+
+.status-indicator.warning {
+    background-color: #ffc107;
+}
+
+.status-indicator.error {
+    background-color: #dc3545;
+}
+
+.status-indicator.info {
+    background-color: #17a2b8;
+}
+
+/* Fancy spinner */
+.spinner-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 20px 0;
+}
+
+.spinner-border {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* Fade-in animation for results */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.fade-in {
+    animation: fadeIn 0.5s ease-in;
+}
+
+/* File upload area */
+.upload-drop-zone {
+    border: 2px dashed #007bff;
+    border-radius: 5px;
+    padding: 25px;
+    text-align: center;
+    background-color: #f8f9fa;
+    cursor: pointer;
+    transition: border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.upload-drop-zone:hover {
+    border-color: #0056b3;
+    background-color: #e9ecef;
+}
+
+.upload-drop-zone.drag-over {
+    border-color: #28a745;
+    background-color: #e8f5e9;
+}
+
+/* Highlight for search results */
+.highlight {
+    background-color: #fff3cd;
+    padding: 0 3px;
+    border-radius: 3px;
+}
+
+/* Responsive adjustments for mobile */
+@media (max-width: 576px) {
+    .progress {
+        height: 15px;
+    }
+    
+    .spinner-border {
+        width: 2rem;
+        height: 2rem;
+    }
+}
+
+/* Add these styles to your style.css file */
+
+/* Markdown content styling */
+.markdown-content {
+    line-height: 1.6;
+    font-size: 1rem;
+}
+
+.markdown-content h1, 
+.markdown-content h2, 
+.markdown-content h3, 
+.markdown-content h4, 
+.markdown-content h5, 
+.markdown-content h6 {
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.markdown-content h1 {
+    font-size: 2rem;
+    border-bottom: 1px solid #eaecef;
+    padding-bottom: 0.3rem;
+}
+
+.markdown-content h2 {
+    font-size: 1.5rem;
+    border-bottom: 1px solid #eaecef;
+    padding-bottom: 0.3rem;
+}
+
+.markdown-content h3 {
+    font-size: 1.25rem;
+}
+
+.markdown-content h4 {
+    font-size: 1rem;
+}
+
+.markdown-content p {
+    margin-bottom: 1rem;
+}
+
+.markdown-content a {
+    color: #0366d6;
+    text-decoration: none;
+}
+
+.markdown-content a:hover {
+    text-decoration: underline;
+}
+
+.markdown-content code {
+    padding: 0.2em 0.4em;
+    background-color: rgba(27, 31, 35, 0.05);
+    border-radius: 3px;
+    font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 85%;
+}
+
+.markdown-content pre {
+    background-color: #f6f8fa;
+    border-radius: 3px;
+    padding: 16px;
+    overflow: auto;
+    margin-bottom: 1rem;
+}
+
+.markdown-content pre code {
+    background-color: transparent;
+    padding: 0;
+    border-radius: 0;
+}
+
+.markdown-content blockquote {
+    padding: 0 1em;
+    color: #6a737d;
+    border-left: 3px solid #dfe2e5;
+    margin-bottom: 1rem;
+}
+
+.markdown-content ul, 
+.markdown-content ol {
+    padding-left: 2em;
+    margin-bottom: 1rem;
+}
+
+.markdown-content li {
+    margin-bottom: 0.25rem;
+}
+
+.markdown-content table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-bottom: 1rem;
+}
+
+.markdown-content table th,
+.markdown-content table td {
+    padding: 6px 13px;
+    border: 1px solid #dfe2e5;
+}
+
+.markdown-content table tr:nth-child(2n) {
+    background-color: #f6f8fa;
+}
+
+/* Improve the appearance of the answer text container */
+.answer-text {
+    background-color: #f8f9fa;
+    border-radius: 5px;
+    padding: 20px;
+    margin-bottom: 0;
+}
