@@ -190,6 +190,9 @@ def home():
     return render_template('index.html', 
                           is_configured=is_configured, 
                           config=config)
+@app.route('/health')
+def health_check():
+    return "OK", 200
 
 @app.route('/setup', methods=['GET', 'POST'])
 def setup():
