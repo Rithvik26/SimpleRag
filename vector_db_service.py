@@ -38,7 +38,9 @@ class VectorDBService:
                 raise ValueError("Qdrant URL not configured")
             if not self.qdrant_api_key:
                 raise ValueError("Qdrant API key not configured")
-            
+            # Additional check for default URL
+            if "3cbcacc0-1fe5-42a1-8be0-81515a21771b" in self.qdrant_url:
+                raise ValueError("Please configure your own Qdrant instance URL")
             logger.info(f"Initializing Qdrant client with URL: {self.qdrant_url}")
             
             # Determine connection method based on URL

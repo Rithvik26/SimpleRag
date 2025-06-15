@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG = {
     "gemini_api_key": os.environ.get("GEMINI_API_KEY", ""),
     "claude_api_key": os.environ.get("CLAUDE_API_KEY", ""),
-    "qdrant_url": os.environ.get("QDRANT_URL", "https://3cbcacc0-1fe5-42a1-8be0-81515a21771b.us-west-2-0.aws.cloud.qdrant.io"),
+    "qdrant_url": os.environ.get("QDRANT_URL", ""),
     "qdrant_api_key": os.environ.get("QDRANT_API_KEY", ""),
     "collection_name": os.environ.get("QDRANT_COLLECTION", "simple_rag_docs"),
     "graph_collection_name": os.environ.get("QDRANT_GRAPH_COLLECTION", "simple_rag_graph"),
